@@ -1,5 +1,6 @@
 import math as m
 import numpy as np
+
 # from tf_transformations import quaternion_from_euler
 import logging
 
@@ -57,8 +58,10 @@ def calculate_local_coordinates(pitch, roll):
     rotation_matrix = calculate_rotation_matrix(pitch, roll)
     return np.dot(rotation_matrix, E_local.T).T
 
+
 def calculate_string_lengths(E_global_coords):
     return np.linalg.norm(A_frame_coods - E_global_coords, axis=1)
+
 
 def calculate_kinematics(x, y, z, pitch, roll):
     local_coordinates = calculate_local_coordinates(pitch, roll)
@@ -67,14 +70,17 @@ def calculate_kinematics(x, y, z, pitch, roll):
     logging.info("End Effector Global Coordinates:\n%s", E_global_coords)
     L_strings = calculate_string_lengths(E_global_coords)
     logging.info("String Lengths:\n%s", L_strings)
-    angles = L_strings * 360 / (2 * m.pi * SPOOL_RADIUS)  # Convert length to angle (degrees)
+    angles = (
+        L_strings * 360 / (2 * m.pi * SPOOL_RADIUS)
+    )  # Convert length to angle (degrees)
     logging.info("Motor Angles (degrees):\n%s", angles)
+    return E_global_coords
 
 
 if __name__ == "__main__":
     x = 0  # m
     y = 0  # m
-    z = 0.  # m
+    z = 0.0  # m
     pitch = m.radians(10)  # radians
     roll = m.radians(0)  # radians
 
