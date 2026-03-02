@@ -1,0 +1,81 @@
+import math as m
+import numpy as np
+# from tf_transformations import quaternion_from_euler
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+END_EFFECTOR_MASS = 1.0  # kg
+S = 2.0  # m - Outside frame size
+E_W = 0.05  # m - End effector width
+E_L = 0.05  # m - End effector length
+E_H = 0.1  # m - End effector height
+SPOOL_RADIUS = 0.02  # m - Spool radius
+
+A_frame_coods = np.array(
+    [
+        np.array([S / 2, S / 2, 0]),
+        np.array([-S / 2, S / 2, 0]),
+        np.array([-S / 2, -S / 2, 0]),
+        np.array([S / 2, -S / 2, 0]),
+    ]
+)
+
+E_local = np.array(
+    [
+        np.array([E_W / 2, E_L / 2, 0]),
+        np.array([-E_W / 2, E_L / 2, 0]),
+        np.array([-E_W / 2, -E_L / 2, 0]),
+        np.array([E_W / 2, -E_L / 2, 0]),
+    ]
+)
+
+# def get_quaternion(pitch, roll):
+#     # This function expects roll (x), pitch (y), and yaw (z).
+#     # It returns the quaternion as a list: [x, y, z, w]
+#     return quaternion_from_euler(roll, pitch, 0.0)
+
+
+def calculate_rotation_matrix(pitch, roll):
+    # Using ZYX Euler angles (yaw, pitch, roll) for rotation
+    return np.array(  # Rotation around X-axis (roll)
+        [
+            [1, 0, 0],
+            [0, m.cos(roll), -m.sin(roll)],
+            [0, m.sin(roll), m.cos(roll)],
+        ]
+    ) @ np.array(  # Rotation around Y-axis (pitch)
+        [
+            [m.cos(pitch), 0, m.sin(pitch)],
+            [0, 1, 0],
+            [-m.sin(pitch), 0, m.cos(pitch)],
+        ]
+    )
+
+
+def calculate_local_coordinates(pitch, roll):
+    rotation_matrix = calculate_rotation_matrix(pitch, roll)
+    return np.dot(rotation_matrix, E_local.T).T
+
+def calculate_string_lengths(E_global_coords):
+    return np.linalg.norm(A_frame_coods - E_global_coords, axis=1)
+
+def calculate_kinematics(x, y, z, pitch, roll):
+    local_coordinates = calculate_local_coordinates(pitch, roll)
+    E_global_coords = np.array([x, y, z]) + local_coordinates
+    logging.info("Local Coordinates:\n%s", local_coordinates)
+    logging.info("End Effector Global Coordinates:\n%s", E_global_coords)
+    L_strings = calculate_string_lengths(E_global_coords)
+    logging.info("String Lengths:\n%s", L_strings)
+    angles = L_strings * 360 / (2 * m.pi * SPOOL_RADIUS)  # Convert length to angle (degrees)
+    logging.info("Motor Angles (degrees):\n%s", angles)
+
+
+if __name__ == "__main__":
+    x = 0  # m
+    y = 0  # m
+    z = 0.  # m
+    pitch = m.radians(10)  # radians
+    roll = m.radians(0)  # radians
+
+    calculate_kinematics(x, y, z, pitch, roll)
