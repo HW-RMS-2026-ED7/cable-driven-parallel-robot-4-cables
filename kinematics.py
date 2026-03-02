@@ -8,9 +8,9 @@ logging.basicConfig(level=logging.INFO)
 
 END_EFFECTOR_MASS = 1.0  # kg
 S = 2.0  # m - Outside frame size
-E_W = 0.05  # m - End effector width
-E_L = 0.05  # m - End effector length
-E_H = 0.1  # m - End effector height
+E_W = 0.2  # m - End effector width
+E_L = 0.2  # m - End effector length
+E_H = 0.01  # m - End effector height
 SPOOL_RADIUS = 0.02  # m - Spool radius
 
 A_frame_coods = np.array(
