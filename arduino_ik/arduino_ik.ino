@@ -1,10 +1,16 @@
 #include <Dynamixel2Arduino.h>
 #include <math.h> // Standard C math library for sin, cos, sqrt
 
+// Calibration:
+// C - S
+
+// Inverse Kinematics:
+// 0.0, 0.0, -0.4, 0.0, 0.0
+
 // --- Configuration OpenCR & Dynamixel ---
 #define DXL_SERIAL   Serial3
 const int DXL_DIR_PIN = 84;
-const uint8_t DXL_ID[4] = {1, 2, 3, 4};
+const uint8_t DXL_ID[4] = {1, 3, 4, 2};
 const float DXL_PROTOCOL_VERSION = 2.0;
 
 Dynamixel2Arduino dxl(DXL_SERIAL, DXL_DIR_PIN);
@@ -12,9 +18,9 @@ using namespace ControlTableItem;
 
 // --- Robot Kinematics Parameters ---
 const float S = 0.4;  // m - Outside frame size
-const float E_W = 0.1;  // m - End effector width
-const float E_L = 0.1;  // m - End effector length
-const float SPOOL_RADIUS = 0.06; // m - End effector height
+const float E_W = 0.08;  // m - End effector width
+const float E_L = 0.08;  // m - End effector length
+const float SPOOL_RADIUS = 0.03; // m - End effector height
 const float DXL_STEPS_PER_REV = 4096.0;
 
 const float A[4][3] = {
