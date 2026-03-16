@@ -1,0 +1,48 @@
+<mujoco model="cdpr">
+    <compiler angle="degree" coordinate="local"/>
+    <option timestep="0.01" gravity="0 0 -9.81"/>
+    <worldbody>
+        <body name="base" pos="0 0 0">
+            <geom type="box" size="0.5 0.5 0.1" rgba="0.8 0.8 0.8 1"/>
+        </body>
+        <body name="end_effector" pos="0 0 -1">
+            <geom type="sphere" size="0.1" rgba="0.8 0.2 0.2 1"/>
+        </body>
+        <body name="cable1" pos="0 0 0">
+            <geom type="cylinder" size="0.05 1" rgba="0.2 0.8 1"/>
+        </body>
+        <body name="cable2" pos="0 0 0">
+            <geom type="cylinder" size="0.05 1" rgba="0.2 0.8 1"/>
+        </body>
+        <body name="cable3" pos="0 0 0">
+            <geom type="cylinder" size="0.05 1" rgba="0.2 0.8 1"/>
+        </body>
+        <body name="cable4" pos="0 0 0">
+            <geom type="cylinder" size="0.05 1" rgba="0.2 0.8 1"/>
+        </body>
+    </worldbody>
+    <tendon>
+        <spatial name="cable1_tendon" width="0.05" rgba="0.2 0.8 1">
+            <site site="cable1_start" pos="0 0 0"/>
+            <site site="cable1_end" pos="0 0 -1"/>
+        </spatial>
+        <spatial name="cable2_tendon" width="0.05" rgba="0.2 0.8 1">
+            <site site="cable2_start" pos="0 0 0"/>
+            <site site="cable2_end" pos="0 0 -1"/>
+        </spatial>
+        <spatial name="cable3_tendon" width="0.05" rgba="0.2 0.8 1">
+            <site site="cable3_start" pos="0 0 0"/>
+            <site site="cable3_end" pos="0 0 -1"/>
+        </spatial>
+        <spatial name="cable4_tendon" width="0.05" rgba="0.2 0.8 1">
+            <site site="cable4_start    " pos="0 0 0"/>
+            <site site="cable4_end" pos="0 0 -1"/>
+        </spatial>
+    </tendon>
+    <actuator>
+        <motor name="cable1_motor" tendon="cable1_tendon" ctrlrange="0 1" gear="1"/>
+        <motor name="cable2_motor" tendon="cable2_tendon" ctrlrange="0 1" gear="1"/>
+        <motor name="cable3_motor" tendon="cable3_tendon" ctrlrange="0 1" gear="1"/>
+        <motor name="cable4_motor" tendon="cable4_tendon" ctrlrange="0 1" gear="1"/>
+    </actuator>
+</mujoco>
