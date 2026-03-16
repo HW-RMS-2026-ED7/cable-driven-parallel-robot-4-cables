@@ -12,22 +12,24 @@ E_W = 0.2  # m - End effector width
 E_L = 0.2  # m - End effector length
 E_H = 0.01  # m - End effector height
 SPOOL_RADIUS = 0.02  # m - Spool radius
+Z = 2.0  # m - Height of the frame anchors (MuJoCo's Z=0 is the ground, so we place anchors at Z=2.0)
+Z_EFF = 1.0  # m - Default height of the end effector (for initial kinematics calculation)
 
 A_frame_coods = np.array(
     [
-        np.array([S / 2, S / 2, 0]),
-        np.array([-S / 2, S / 2, 0]),
-        np.array([-S / 2, -S / 2, 0]),
-        np.array([S / 2, -S / 2, 0]),
+        np.array([S / 2, S / 2, Z]),
+        np.array([-S / 2, S / 2, Z]),
+        np.array([-S / 2, -S / 2, Z]),
+        np.array([S / 2, -S / 2, Z]),
     ]
 )
 
 E_local = np.array(
     [
-        np.array([E_W / 2, E_L / 2, 0]),
-        np.array([-E_W / 2, E_L / 2, 0]),
-        np.array([-E_W / 2, -E_L / 2, 0]),
-        np.array([E_W / 2, -E_L / 2, 0]),
+        np.array([E_W / 2, E_L / 2, Z_EFF]),
+        np.array([-E_W / 2, E_L / 2, Z_EFF]),
+        np.array([-E_W / 2, -E_L / 2, Z_EFF]),
+        np.array([E_W / 2, -E_L / 2, Z_EFF]),
     ]
 )
 
