@@ -14,15 +14,14 @@
 //    8. Catenary-free (fishing line is inextensible at these loads)
 //
 //  CONTROL PHILOSOPHY:
-//    Mode 5 (Current-Based Position Control) commands BOTH a goal position
-//    AND a goal current.  We set:
+//    Mode 5 (Current-Based Position Control) commands a goal position
+//    AND a maximum current (torque limit).  We set:
 //      • Goal Position  = geometric cable length from IK  (+ calibration offset)
-//      • Goal Current   = required cable tension converted to motor current
-//                         + friction compensation + safety margin
-//    This gives hybrid position-tension control: the motor drives toward the
-//    correct length but never exceeds the force budget for that cable.
-//    The wrench solver distributes tensions to minimise residual moments,
-//    which is the main lever against tilt in a 4-cable / 6-DOF system.
+//      • Goal Current   = UPPER BOUND on motor current, computed from the
+//                         wrench solver's ideal tension + friction + margin.
+//    The motor's internal PID drives toward the position; Goal Current only
+//    prevents exceeding the force budget.  Actual cable tensions are set by
+//    the force equilibrium at the EE, not directly by Goal Current.
 //
 // ============================================================================
 
@@ -67,9 +66,9 @@ const float GRAVITY = 9.81;
 // --- Dynamixel XM430-W210-T -----------------------------------------------
 const float DXL_STEPS_PER_REV = 4096.0;
 //  Effective torque constant  Kt_eff = stall_torque / stall_current
-//  XM430-W210-T @ 12 V:  3.0 Nm / 2.3 A ≈ 1.30 Nm/A
+//  XM430-W210-T @ 12 V:  2.7 Nm / 2.1 A ≈ 1.29 Nm/A
 //  This maps input current to output-shaft torque (includes gearbox).
-const float TORQUE_CONSTANT = 1.30;   // Nm / A
+const float TORQUE_CONSTANT = 1.29;   // Nm / A
 //  Current resolution: 1 Dynamixel unit = 2.69 mA
 const float DXL_CURRENT_UNIT = 0.00269;  // A per unit
 
@@ -168,41 +167,42 @@ static inline void cross3(const float a[3], const float b[3], float out[3]) {
 }
 
 // Gauss-Jordan 4×4 inverse with partial pivoting.
+// Uses double precision internally to protect against numerical instability.
 // Returns false if singular.
 bool invert4x4(float A[4][4], float Ainv[4][4]) {
-  float aug[4][8];
+  double aug[4][8];
   for (int i = 0; i < 4; i++)
     for (int j = 0; j < 4; j++) {
-      aug[i][j]   = A[i][j];
-      aug[i][j+4] = (i == j) ? 1.0f : 0.0f;
+      aug[i][j]   = (double)A[i][j];
+      aug[i][j+4] = (i == j) ? 1.0 : 0.0;
     }
 
   for (int col = 0; col < 4; col++) {
     // Partial pivot
     int best = col;
     for (int r = col + 1; r < 4; r++)
-      if (fabsf(aug[r][col]) > fabsf(aug[best][col])) best = r;
+      if (fabs(aug[r][col]) > fabs(aug[best][col])) best = r;
     if (best != col)
       for (int j = 0; j < 8; j++) {
-        float tmp = aug[col][j]; aug[col][j] = aug[best][j]; aug[best][j] = tmp;
+        double tmp = aug[col][j]; aug[col][j] = aug[best][j]; aug[best][j] = tmp;
       }
-    if (fabsf(aug[col][col]) < 1e-10f) return false;
+    if (fabs(aug[col][col]) < 1e-15) return false;
 
     // Scale row
-    float piv = aug[col][col];
+    double piv = aug[col][col];
     for (int j = 0; j < 8; j++) aug[col][j] /= piv;
 
     // Eliminate
     for (int r = 0; r < 4; r++) {
       if (r == col) continue;
-      float f = aug[r][col];
+      double f = aug[r][col];
       for (int j = 0; j < 8; j++) aug[r][j] -= f * aug[col][j];
     }
   }
 
   for (int i = 0; i < 4; i++)
     for (int j = 0; j < 4; j++)
-      Ainv[i][j] = aug[i][j+4];
+      Ainv[i][j] = (float)aug[i][j+4];
   return true;
 }
 
@@ -348,9 +348,12 @@ bool solveTensions(float x, float y, float z, float pitch, float roll,
 
   // --- Positive-tension redistribution -------------------------------------
   //  Shift all tensions upward so the smallest one = T_MIN_N.
-  //  This is equivalent to adding a uniform pre-tension "λ" that doesn't
-  //  change the net wrench direction — it only adds a small extra downward
-  //  force (all cables pull up), which the solver already accounts for.
+  //  WARNING: With only 4 cables and 6 DOF there is NO null-space, so this
+  //  shift introduces a parasitic wrench (extra force + moment).  For small
+  //  shifts near the centred home pose the effect is minor.  The residual
+  //  wrench computed below captures the full error including this shift.
+  //  A proper fix would require a QP solver (minimise ||T||² s.t. T≥T_MIN,
+  //  W·T≈b), which is overkill for this project.
   float t_min_found = tensions_out[0];
   for (int i = 1; i < 4; i++)
     if (tensions_out[i] < t_min_found) t_min_found = tensions_out[i];
@@ -446,6 +449,16 @@ void moveToTarget(float x, float y, float z, float pitch, float roll) {
   float lengths[4], u[4][3], r_vec[4][3];
   computeIK(x, y, z, pitch, roll, lengths, u, r_vec);
 
+  // --- 3b. Workspace reachability check -----------------------------------
+  for (int i = 0; i < 4; i++) {
+    if (lengths[i] < 0.01f || lengths[i] > 0.60f) {
+      Serial.print(F("ERROR: Cable ")); Serial.print(i);
+      Serial.print(F(" length = ")); Serial.print(lengths[i], 4);
+      Serial.println(F(" m — out of range. Move rejected."));
+      return;
+    }
+  }
+
   // --- 4. Command each motor: position + current --------------------------
   Serial.print(F("  CMD →  "));
   for (int i = 0; i < 4; i++) {
@@ -489,7 +502,7 @@ void startCalibration() {
     dxl.torqueOff(DXL_ID[i]);
     dxl.setOperatingMode(DXL_ID[i], OP_CURRENT);
     dxl.torqueOn(DXL_ID[i]);
-    dxl.setGoalCurrent(DXL_ID[i], CAL_TENSION_CURRENT);
+    dxl.setGoalCurrent(DXL_ID[i], MOTOR_DIR[i] * CAL_TENSION_CURRENT);
   }
 }
 
@@ -497,6 +510,8 @@ void stopCalibration() {
   if (!is_calibrating) { Serial.println(F("Not calibrating.")); return; }
 
   Serial.println(F("--- REGISTERING HOME ---"));
+  Serial.println(F("Settling..."));
+  delay(CAL_SETTLE_MS);
 
   float home_len[4], home_u[4][3], home_r[4][3];
   computeIK(HOME_X, HOME_Y, HOME_Z, HOME_PITCH, HOME_ROLL,
@@ -564,7 +579,7 @@ void runFrictionCalibration() {
       dxl.setGoalCurrent(DXL_ID[m], c);
       delay(FRIC_STEP_DELAY_MS);
       int32_t vel = dxl.getPresentVelocity(DXL_ID[m]);
-      if (abs(vel) >= FRIC_VEL_THRESHOLD) {
+      if (labs(vel) >= FRIC_VEL_THRESHOLD) {
         threshold_pos = c;
         break;
       }
@@ -577,8 +592,8 @@ void runFrictionCalibration() {
       dxl.setGoalCurrent(DXL_ID[m], c);
       delay(FRIC_STEP_DELAY_MS);
       int32_t vel = dxl.getPresentVelocity(DXL_ID[m]);
-      if (abs(vel) >= FRIC_VEL_THRESHOLD) {
-        threshold_neg = abs(c);
+      if (labs(vel) >= FRIC_VEL_THRESHOLD) {
+        threshold_neg = labs(c);
         break;
       }
     }
@@ -631,6 +646,7 @@ void runFrictionCalibration() {
 
 void runWeightEstimation() {
   Serial.println(F("=== WEIGHT ESTIMATION ==="));
+  Serial.println(F("WARNING: Using HOME pose vectors. EE must be at home position!"));
   Serial.println(F("Ensure the EE is stationary at a known pose (ideally home)."));
   Serial.println(F("Waiting for settle..."));
   delay(CAL_SETTLE_MS);
