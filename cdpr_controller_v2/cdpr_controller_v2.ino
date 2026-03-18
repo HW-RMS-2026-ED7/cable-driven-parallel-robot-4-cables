@@ -29,6 +29,11 @@
 #include <Dynamixel2Arduino.h>
 #include <math.h>
 
+#if USE_IMU
+#include <IMU.h>
+cIMU imu;
+#endif
+
 // ████████████████████████████████████████████████████████████████████████████
 //  SECTION 1 — EASY-TO-CHANGE PARAMETERS
 //  Modify these freely.  Units in comments.
@@ -107,6 +112,33 @@ const int16_t  FRIC_CURRENT_MAX    = 80;    // Give up above this
 const uint32_t FRIC_STEP_DELAY_MS  = 300;   // Wait per step
 const int32_t  FRIC_VEL_THRESHOLD  = 3;     // Velocity units = "motor is moving"
 
+// --- Tilt management -------------------------------------------------------
+//  Hard-reject moves where the wrench residual predicts unacceptable tilt.
+//  0.05 Nm ≈ 2–3° on a 150 g platform.  Raise if too restrictive, but the
+//  EE WILL tilt at off-centre poses — this just tells you by how much.
+const float MAX_RESIDUAL_MOMENT_NM = 0.05f;
+
+// --- EE centre-of-mass vertical offset (metres) ----------------------------
+//  Distance the CoM sits BELOW the cable attachment plane.
+//  0 = CoM exactly at the attachment centre; positive = below (stabilising).
+//  Used to include the gravity moment when pitch / roll ≠ 0.
+//  Measure or estimate from a CAD model.
+const float EE_COM_OFFSET_Z = 0.0f;
+
+// --- Workspace limits (metres) — moves outside are rejected ----------------
+//  Keep at least ~30 mm clearance inside the anchor footprint.
+const float WS_X_MAX =  0.13f;   // ±  (FRAME_WIDTH/2  − margin)
+const float WS_Y_MAX =  0.13f;   // ±  (FRAME_HEIGHT/2 − margin)
+const float WS_Z_MIN = -0.35f;   // lower bound (below frame)
+const float WS_Z_MAX = -0.05f;   // upper bound (stay below anchors)
+
+// --- IMU orientation feedback ----------------------------------------------
+//  The OpenCR 1.0 board has an onboard MPU9250.  Set this to 1 to enable
+//  closed-loop orientation control using the measured roll / pitch.
+//  Requires the OpenCR board's cIMU library.  When enabled the solver uses
+//  the *actual* EE orientation so it corrects tilt rather than ignoring it.
+#define USE_IMU  0   // 0 = open-loop (default), 1 = closed-loop via IMU
+
 // ████████████████████████████████████████████████████████████████████████████
 //  SECTION 2 — HARDWARE WIRING
 // ████████████████████████████████████████████████████████████████████████████
@@ -156,6 +188,7 @@ int32_t motor_offset[NUM_MOTORS]     = {0, 0, 0, 0};
 int16_t friction_current[NUM_MOTORS] = {0, 0, 0, 0};  // Coulomb friction (Dxl units, always ≥ 0)
 bool    is_calibrating = false;
 float   last_tensions[4] = {0};   // Most recent commanded tensions (for telemetry)
+float   last_pretension_shift = 0; // Redistribution shift applied during last move (N)
 
 // ████████████████████████████████████████████████████████████████████████████
 //  SECTION 5 — MATH HELPERS
@@ -294,10 +327,11 @@ int32_t lengthToSteps(float length_m) {
 //    solver could NOT eliminate (tells you expected tilt magnitude).
 //
 bool solveTensions(float x, float y, float z, float pitch, float roll,
-                   float tensions_out[4], float residual_moment[3]) {
+                   float tensions_out[4], float residual_moment[3],
+                   float lengths_out[4]) {
 
-  float lengths[4], u[4][3], r_vec[4][3];
-  computeIK(x, y, z, pitch, roll, lengths, u, r_vec);
+  float u[4][3], r_vec[4][3];
+  computeIK(x, y, z, pitch, roll, lengths_out, u, r_vec);
 
   // --- Build W (6×4) -------------------------------------------------------
   float W[6][4];
@@ -315,7 +349,18 @@ bool solveTensions(float x, float y, float z, float pitch, float roll,
   }
 
   // --- b = external wrench (gravity only) ----------------------------------
+  //  When EE_COM_OFFSET_Z > 0 the CoM is below the attachment plane.
+  //  A tilted EE then has a gravity moment: M = r_com × F_grav.
+  //  r_com (world) = R * [0, 0, -EE_COM_OFFSET_Z]  →
+  //    Mx_cables =  m·g · sin(roll)        · EE_COM_OFFSET_Z
+  //    My_cables =  m·g · cos(roll)·sin(pitch) · EE_COM_OFFSET_Z
+  float cp = cosf(pitch), sp = sinf(pitch);
+  float cr = cosf(roll),  sr = sinf(roll);
   float b[6] = {0, 0, ee_mass_kg * GRAVITY, 0, 0, 0};
+  if (EE_COM_OFFSET_Z != 0.0f) {
+    b[3] += ee_mass_kg * GRAVITY * sr        * EE_COM_OFFSET_Z;
+    b[4] += ee_mass_kg * GRAVITY * cr * sp   * EE_COM_OFFSET_Z;
+  }
 
   // --- WᵀW  (4×4) ---------------------------------------------------------
   float WtW[4][4] = {{0}};
@@ -348,17 +393,19 @@ bool solveTensions(float x, float y, float z, float pitch, float roll,
 
   // --- Positive-tension redistribution -------------------------------------
   //  Shift all tensions upward so the smallest one = T_MIN_N.
-  //  This is equivalent to adding a uniform pre-tension "λ" that doesn't
-  //  change the net wrench direction — it only adds a small extra downward
-  //  force (all cables pull up), which the solver already accounts for.
+  //  NOTE: a uniform shift of λ N adds extra wrench W·[λ,λ,λ,λ]ᵀ which
+  //  includes a small moment when cables are asymmetric (off-centre poses).
+  //  This is the dominant source of residual tilt — keep T_MIN_N small to
+  //  minimise it, and/or enlarge the EE platform to increase moment authority.
   float t_min_found = tensions_out[0];
   for (int i = 1; i < 4; i++)
     if (tensions_out[i] < t_min_found) t_min_found = tensions_out[i];
 
+  last_pretension_shift = 0;
   if (t_min_found < T_MIN_N) {
-    float shift = T_MIN_N - t_min_found;
+    last_pretension_shift = T_MIN_N - t_min_found;
     for (int i = 0; i < 4; i++)
-      tensions_out[i] += shift;
+      tensions_out[i] += last_pretension_shift;
   }
 
   // --- Compute residual wrench  (W·T - b) ----------------------------------
@@ -411,22 +458,53 @@ int16_t tensionToCurrent(float tension_N, int motor_idx) {
 
 void moveToTarget(float x, float y, float z, float pitch, float roll) {
 
-  // --- 1. Solve optimal tensions -------------------------------------------
+  // --- 0. Workspace bounds check ------------------------------------------
+  if (fabsf(x) > WS_X_MAX || fabsf(y) > WS_Y_MAX ||
+      z < WS_Z_MIN         || z > WS_Z_MAX) {
+    Serial.println(F("ERROR: Target outside workspace limits. Move rejected."));
+    Serial.print(F("  Limits: |X|<")); Serial.print(WS_X_MAX,3);
+    Serial.print(F("  |Y|<")); Serial.print(WS_Y_MAX,3);
+    Serial.print(F("  Z in [")); Serial.print(WS_Z_MIN,3);
+    Serial.print(F(",")); Serial.print(WS_Z_MAX,3); Serial.println(F("]"));
+    return;
+  }
+
+  // --- 1. Read actual orientation from IMU (if enabled) -------------------
+#if USE_IMU
+  //  The IMU gives the real EE roll & pitch.  Solving for the *actual*
+  //  orientation means tensions are correct for where the EE really is,
+  //  creating a restoring wrench back toward commanded zero tilt.
+  float solve_pitch = imu.getPitchAngle() * DEG_TO_RAD;
+  float solve_roll  = imu.getRollAngle()  * DEG_TO_RAD;
+#else
+  float solve_pitch = pitch;
+  float solve_roll  = roll;
+#endif
+
+  // --- 2. Solve optimal tensions -------------------------------------------
   float tensions[4];
   float res_moment[3];
-  bool ok = solveTensions(x, y, z, pitch, roll, tensions, res_moment);
+  float lengths[4];
+  bool ok = solveTensions(x, y, z, solve_pitch, solve_roll,
+                          tensions, res_moment, lengths);
 
   if (!ok) {
     Serial.println(F("ERROR: Degenerate cable configuration. Move rejected."));
     return;
   }
 
-  // --- 2. Report tensions & residual ---------------------------------------
+  // --- 3. Report tensions, shift & residual --------------------------------
   Serial.print(F("  Tensions (N):  "));
   for (int i = 0; i < 4; i++) {
     Serial.print(tensions[i], 3); Serial.print(F("  "));
   }
   Serial.println();
+
+  if (last_pretension_shift > 0) {
+    Serial.print(F("  Pre-tension shift: "));
+    Serial.print(last_pretension_shift, 3);
+    Serial.println(F(" N  (adds uncorrectable moment at off-centre poses)"));
+  }
 
   Serial.print(F("  Residual M (Nm): Mx="));
   Serial.print(res_moment[0], 5); Serial.print(F("  My="));
@@ -436,17 +514,22 @@ void moveToTarget(float x, float y, float z, float pitch, float roll) {
   float moment_mag = sqrtf(res_moment[0]*res_moment[0]
                          + res_moment[1]*res_moment[1]
                          + res_moment[2]*res_moment[2]);
-  if (moment_mag > 0.01) {
+
+  if (moment_mag > MAX_RESIDUAL_MOMENT_NM) {
+    Serial.print(F("ERROR: |M_residual| = "));
+    Serial.print(moment_mag, 4);
+    Serial.print(F(" Nm exceeds limit (")); Serial.print(MAX_RESIDUAL_MOMENT_NM, 3);
+    Serial.println(F(" Nm). Move rejected to prevent tilt."));
+    Serial.println(F("  → Try a smaller offset, larger EE footprint, or raise MAX_RESIDUAL_MOMENT_NM."));
+    return;
+  } else if (moment_mag > 0.01f) {
     Serial.print(F("  WARNING: |M_residual| = "));
     Serial.print(moment_mag, 4);
-    Serial.println(F(" Nm — expect some tilt at this pose."));
+    Serial.println(F(" Nm — expect minor tilt at this pose."));
   }
 
-  // --- 3. Compute cable lengths (IK) --------------------------------------
-  float lengths[4], u[4][3], r_vec[4][3];
-  computeIK(x, y, z, pitch, roll, lengths, u, r_vec);
-
   // --- 4. Command each motor: position + current --------------------------
+  //  Cable lengths already computed by solveTensions — no second IK call needed.
   Serial.print(F("  CMD →  "));
   for (int i = 0; i < 4; i++) {
     // Position: geometric length → steps → apply calibration offset & direction
@@ -711,6 +794,8 @@ void printDiagnostics() {
     Serial.print(last_tensions[i], 3); Serial.print(F("  "));
   }
   Serial.println();
+  Serial.print(F("  Pre-tension shift: ")); Serial.print(last_pretension_shift, 3);
+  Serial.println(F(" N"));
   Serial.println(F("-------------------"));
 }
 
@@ -735,6 +820,19 @@ void printConfig() {
   Serial.println();
   Serial.print(F("  T_min:        ")); Serial.print(T_MIN_N,2);
   Serial.println(F(" N"));
+  Serial.print(F("  Max resid M:  ")); Serial.print(MAX_RESIDUAL_MOMENT_NM,3);
+  Serial.println(F(" Nm"));
+  Serial.print(F("  CoM offset Z: ")); Serial.print(EE_COM_OFFSET_Z*1000,1);
+  Serial.println(F(" mm"));
+  Serial.print(F("  Workspace X:  ±")); Serial.print(WS_X_MAX*100,1); Serial.println(F(" cm"));
+  Serial.print(F("  Workspace Y:  ±")); Serial.print(WS_Y_MAX*100,1); Serial.println(F(" cm"));
+  Serial.print(F("  Workspace Z:  [")); Serial.print(WS_Z_MIN*100,1);
+  Serial.print(F(", ")); Serial.print(WS_Z_MAX*100,1); Serial.println(F("] cm"));
+#if USE_IMU
+  Serial.println(F("  IMU feedback: ENABLED"));
+#else
+  Serial.println(F("  IMU feedback: disabled (set USE_IMU 1 to enable)"));
+#endif
   Serial.print(F("  Home: "));
   Serial.print(HOME_X,3); Serial.print(F(", "));
   Serial.print(HOME_Y,3); Serial.print(F(", "));
@@ -769,6 +867,14 @@ void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 3000);  // Wait up to 3s for serial monitor
 
+#if USE_IMU
+  imu.begin();
+  delay(500);  // Let IMU settle
+  Serial.println(F("IMU orientation feedback ENABLED."));
+#else
+  Serial.println(F("IMU disabled (USE_IMU=0). Open-loop orientation."));
+#endif
+
   dxl.begin(1000000);
   dxl.setPortProtocolVersion(DXL_PROTOCOL);
 
@@ -802,6 +908,10 @@ void setup() {
 // ████████████████████████████████████████████████████████████████████████████
 
 void loop() {
+#if USE_IMU
+  imu.update();  // Refresh Mahony/Madgwick filter — call every iteration
+#endif
+
   if (Serial.available() <= 0) return;
 
   char first = Serial.peek();
