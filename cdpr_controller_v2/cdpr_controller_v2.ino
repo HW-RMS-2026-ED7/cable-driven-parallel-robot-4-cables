@@ -83,20 +83,20 @@ const int16_t CURRENT_MARGIN = 15;     // ~40 mA headroom
 
 // --- Absolute current cap (Dynamixel units) --------------------------------
 //  Safety ceiling.  XM430 max is ~1193 mA ≈ 443 units.
-const int16_t CURRENT_CAP = 200;       // ~538 mA
+const int16_t CURRENT_CAP = 400;       // ~538 mA //200 before
 
 // --- Motion profile (Dynamixel units) --------------------------------------
 const uint32_t PROFILE_VEL  = 200;
 const uint32_t PROFILE_ACC  = 50;
 
 // --- Calibration constants -------------------------------------------------
-const int16_t  CAL_TENSION_CURRENT = -30;   // Constant-current reel-in during home cal
+const int16_t  CAL_TENSION_CURRENT = -25;   // Constant-current reel-in during home cal
 const uint32_t CAL_SETTLE_MS       = 2000;  // Wait time before reading positions
 
 // --- Home position ---------------------------------------------------------
 const float HOME_X     =  0.0;
 const float HOME_Y     =  0.0;
-const float HOME_Z     = -0.20;  // Below frame plane
+const float HOME_Z     = -0.46;  // Below frame plane
 const float HOME_PITCH =  0.0;
 const float HOME_ROLL  =  0.0;
 
@@ -125,7 +125,6 @@ const float DXL_PROTOCOL = 2.0;
 // ████████████████████████████████████████████████████████████████████████████
 //  SECTION 3 — ANCHOR & EE ATTACHMENT GEOMETRY
 // ████████████████████████████████████████████████████████████████████████████
-
 //  Anchor layout (top view, frame plane Z = 0):
 //     A0 (+X,+Y)      A1 (-X,+Y)
 //     A3 (+X,-Y)      A2 (-X,-Y)
@@ -451,7 +450,7 @@ void moveToTarget(float x, float y, float z, float pitch, float roll) {
 
   // --- 3b. Workspace reachability check -----------------------------------
   for (int i = 0; i < 4; i++) {
-    if (lengths[i] < 0.01f || lengths[i] > 0.60f) {
+    if (lengths[i] < 0.01f || lengths[i] > 2.0f) {
       Serial.print(F("ERROR: Cable ")); Serial.print(i);
       Serial.print(F(" length = ")); Serial.print(lengths[i], 4);
       Serial.println(F(" m — out of range. Move rejected."));
