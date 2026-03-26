@@ -2,11 +2,11 @@
 <mujoco model="4_cable_robot">
     <compiler angle="radian"/>
 
-    <option gravity="0 0 -9.81" density="1.2" viscosity="0.05"/>
+    <option gravity="0 0 -9.81"/>
 
     <default>
-        <tendon width="0.005" rgba="1 1 1 1" damping="2.0"/>
-        <motor ctrllimited="false"/>
+        <tendon width="0.005" rgba="1 1 1 1"/>
+        <position kp="5000" kv="50"/> 
     </default>
 
     <worldbody>
@@ -20,12 +20,12 @@
 
         <body name="end_effector" pos="0 0 1.0">
             <freejoint/>
-            <geom type="box" size="0.1 0.1 0.005" mass="1.0" rgba="0 0 1 1"/>
+            <geom type="box" size="0.1 0.1 0.005" mass="0.1" rgba="0 0 1 1"/>
 
-            <site name="platform_0" pos="0.1 0.1 1.0" size="0.015" rgba="0 1 0 1"/>
-            <site name="platform_1" pos="-0.1 0.1 1.0" size="0.015" rgba="0 1 0 1"/>
-            <site name="platform_2" pos="-0.1 -0.1 1.0" size="0.015" rgba="0 1 0 1"/>
-            <site name="platform_3" pos="0.1 -0.1 1.0" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_0" pos="0.1 0.1 0" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_1" pos="-0.1 0.1 0" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_2" pos="-0.1 -0.1 0" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_3" pos="0.1 -0.1 0" size="0.015" rgba="0 1 0 1"/>
         </body>
     </worldbody>
 
@@ -37,9 +37,9 @@
     </tendon>
 
     <actuator>
-        <motor name="motor_0" tendon="cable_0"/>
-        <motor name="motor_1" tendon="cable_1"/>
-        <motor name="motor_2" tendon="cable_2"/>
-        <motor name="motor_3" tendon="cable_3"/>
+        <position name="motor_0" tendon="cable_0" gear="0.02"/>
+        <position name="motor_1" tendon="cable_1" gear="0.02"/>
+        <position name="motor_2" tendon="cable_2" gear="0.02"/>
+        <position name="motor_3" tendon="cable_3" gear="0.02"/>
     </actuator>
 </mujoco>

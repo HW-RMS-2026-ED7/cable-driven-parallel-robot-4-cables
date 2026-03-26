@@ -1,6 +1,5 @@
 import mujoco
 import mujoco.viewer
-import time
 import math as m
 import numpy as np
 
@@ -19,51 +18,57 @@ def calculate_target_lengths(x, y, z, pitch, roll):
     return target_lengths
 
 
-# --- MuJoCo Setup & Control Loop ---
+# --- MuJoCo Setup ---
 model = mujoco.MjModel.from_xml_path("cable_robot.xml")
 data = mujoco.MjData(model)
 
 # PD Controller Gains
-Kp = 500.0  # Spring stiffness (How hard to pull to reach target length)
-Kv = 20.0  # Damping (Braking friction to stop oscillations)
+Kp = 500.0  # Spring stiffness
+Kv = 20.0  # Damping
 
-with mujoco.viewer.launch_passive(model, data) as viewer:
-    start_time = time.time()
 
-    while viewer.is_running():
-        step_start = time.time()
-        t = time.time() - start_time
+# --- The Magic Callback ---
+# MuJoCo will automatically call this function every single physics step.
+def my_controller(model, data):
+    # Use MuJoCo's internal simulation time instead of the real-world clock!
+    # This keeps the physics perfectly synced even if the viewer lags.
+    t = data.time
 
-        # --- 5DOF Target Trajectory ---
-        target_x = 0.3 * m.sin(t * 0.5)  # Left/right 30cm
-        target_y = 0.3 * m.cos(t * 0.5)  # Forward/backward 30cm
-        target_z = 1.0 + 0.2 * m.sin(t)  # Bob up and down around Z=1.0m
-        target_pitch = m.radians(10 * m.sin(t * 0.8))  # Tilt pitch
-        target_roll = m.radians(10 * m.cos(t * 0.8))  # Tilt roll
+    # --- 5DOF Target Trajectory ---
+    target_x = 0.3 * m.sin(t * 0.5)
+    target_y = 0.3 * m.cos(t * 0.5)
+    target_z = 1.0 + 0.2 * m.sin(t)
+    target_pitch = m.radians(10 * m.sin(t * 0.8))
+    target_roll = m.radians(10 * m.cos(t * 0.8))
 
-        # Get the desired cable lengths for this position
-        target_L = calculate_target_lengths(
-            target_x, target_y, target_z, target_pitch, target_roll
-        )
+    # Get the desired cable lengths for this position
+    target_L = calculate_target_lengths(
+        target_x, target_y, target_z, target_pitch, target_roll
+    )
 
-        # --- Custom PD Controller (Pull-Only) ---
-        for i in range(4):
-            current_length = data.ten_length[i]
-            current_velocity = data.ten_velocity[i]
+    # --- Custom PD Controller (Pull-Only) ---
+    for i in range(4):
+        current_length = data.ten_length[i]
+        current_velocity = data.ten_velocity[i]
 
-            # If current length > target length, error is positive -> PULL
-            error = current_length - target_L[i]
-            tension = (Kp * error) - (Kv * current_velocity)
+        error = current_length - target_L[i]
+        tension = (Kp * error) - (Kv * current_velocity)
 
-            # Physics Constraint: Cables cannot push!
-            if tension < 0:
-                tension = 0
+        # Physics Constraint: Cables cannot push!
+        if tension < 0:
+            tension = 0
 
-            data.ctrl[i] = tension
+        data.ctrl[i] = tension
 
-        mujoco.mj_step(model, data)
-        viewer.sync()
 
-        time_until_next_step = model.opt.timestep - (time.time() - step_start)
-        if time_until_next_step > 0:
-            time.sleep(time_until_next_step)
+# 1. Register our custom Python function with the MuJoCo engine
+mujoco.set_mjcb_control(my_controller)
+
+print("Starting simulation... (Press ESC to close the viewer)")
+
+# 2. Launch the standard, blocking viewer.
+# You can now run this using standard `python mujoco_runner.py`!
+mujoco.viewer.launch(model, data)
+
+# Optional: Clear the callback when the viewer closes so it doesn't persist in memory
+mujoco.set_mjcb_control(None)

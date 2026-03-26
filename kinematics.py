@@ -6,7 +6,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-END_EFFECTOR_MASS = 1.0  # kg
+END_EFFECTOR_MASS = 0.100  # kg
 S = 2.0  # m - Outside frame size
 E_W = 0.2  # m - End effector width
 E_L = 0.2  # m - End effector length

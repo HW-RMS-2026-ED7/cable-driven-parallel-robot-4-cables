@@ -1,13 +1,15 @@
-from kinematics import Z as FRAME_Z, Z_EFF
+from kinematics import (
+    Z as FRAME_Z,
+    Z_EFF,
+    END_EFFECTOR_MASS,
+    S,
+    E_W,
+    E_L,
+    E_H,
+    SPOOL_RADIUS,
+)
 
 # --- 1. Robot Parameters ---
-END_EFFECTOR_MASS = 1.0  # kg
-S = 2.0  # m - Outside frame size
-E_W = 0.2  # m - End effector width
-E_L = 0.2  # m - End effector length
-E_H = 0.01  # m - End effector height
-SPOOL_RADIUS = 0.02  # m - Spool radius
-
 
 # MuJoCo uses half-sizes for box geoms
 hx, hy, hz = E_W / 2, E_L / 2, E_H / 2
@@ -17,11 +19,11 @@ mjcf_xml = f"""
 <mujoco model="4_cable_robot">
     <compiler angle="radian"/>
 
-    <option gravity="0 0 -9.81" density="1.2" viscosity="0.05"/>
+    <option gravity="0 0 -9.81"/>
 
     <default>
-        <tendon width="0.005" rgba="1 1 1 1" damping="2.0"/>
-        <motor ctrllimited="false"/>
+        <tendon width="0.005" rgba="1 1 1 1"/>
+        <position kp="5000" kv="50"/> 
     </default>
 
     <worldbody>
@@ -33,14 +35,14 @@ mjcf_xml = f"""
         <site name="anchor_2" pos="{-S / 2} {-S / 2} {FRAME_Z}" size="0.02" rgba="1 0 0 1"/>
         <site name="anchor_3" pos="{S / 2} {-S / 2} {FRAME_Z}" size="0.02" rgba="1 0 0 1"/>
 
-        <body name="end_effector" pos="0 0 1.0">
+        <body name="end_effector" pos="0 0 {Z_EFF}">
             <freejoint/>
             <geom type="box" size="{hx} {hy} {hz}" mass="{END_EFFECTOR_MASS}" rgba="0 0 1 1"/>
 
-            <site name="platform_0" pos="{hx} {hy} {Z_EFF}" size="0.015" rgba="0 1 0 1"/>
-            <site name="platform_1" pos="{-hx} {hy} {Z_EFF}" size="0.015" rgba="0 1 0 1"/>
-            <site name="platform_2" pos="{-hx} {-hy} {Z_EFF}" size="0.015" rgba="0 1 0 1"/>
-            <site name="platform_3" pos="{hx} {-hy} {Z_EFF}" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_0" pos="{hx} {hy} 0" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_1" pos="{-hx} {hy} 0" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_2" pos="{-hx} {-hy} 0" size="0.015" rgba="0 1 0 1"/>
+            <site name="platform_3" pos="{hx} {-hy} 0" size="0.015" rgba="0 1 0 1"/>
         </body>
     </worldbody>
 
@@ -52,10 +54,10 @@ mjcf_xml = f"""
     </tendon>
 
     <actuator>
-        <motor name="motor_0" tendon="cable_0"/>
-        <motor name="motor_1" tendon="cable_1"/>
-        <motor name="motor_2" tendon="cable_2"/>
-        <motor name="motor_3" tendon="cable_3"/>
+        <position name="motor_0" tendon="cable_0" gear="{SPOOL_RADIUS}"/>
+        <position name="motor_1" tendon="cable_1" gear="{SPOOL_RADIUS}"/>
+        <position name="motor_2" tendon="cable_2" gear="{SPOOL_RADIUS}"/>
+        <position name="motor_3" tendon="cable_3" gear="{SPOOL_RADIUS}"/>
     </actuator>
 </mujoco>
 """
