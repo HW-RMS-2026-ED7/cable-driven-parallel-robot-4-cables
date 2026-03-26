@@ -34,7 +34,7 @@ const float DXL_CURRENT_UNIT   = 0.00269;   // A per Dxl unit
 const float T_MIN_N = 0.20;  // N
 
 // --- Current margin & cap ---------------------------------------------------
-const int16_t CURRENT_MARGIN = 15;
+const int16_t CURRENT_MARGIN = 50;
 const int16_t CURRENT_CAP    = 800;
 
 // --- Motion profile (Dynamixel units) ---------------------------------------
@@ -48,7 +48,7 @@ const uint32_t CAL_SETTLE_MS       = 2000;
 // --- Home position ----------------------------------------------------------
 const float HOME_X     =  0.0;
 const float HOME_Y     =  0.0;
-const float HOME_Z     = -0.46;
+const float HOME_Z     = -0.20; //-0.46 
 const float HOME_PITCH =  0.0;
 const float HOME_ROLL  =  0.0;
 
